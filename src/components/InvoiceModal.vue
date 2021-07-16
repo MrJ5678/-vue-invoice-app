@@ -5,7 +5,9 @@
     class="invoice-wrap flex flex-column"
   >
     <form @submit.prevent="submitForm" class="invoice-content">
-      <h1>新建发票</h1>
+      <Loading v-show="loading" />
+      <h1 v-if="!editInvoice">新建账单</h1>
+      <h1 v-else>编辑账单</h1>
 
       <!-- 账单 -->
       <div class="bill-from flex flex-column">
@@ -173,11 +175,28 @@
       <!-- Save/Exit -->
       <div class="save flex">
         <div class="left">
-          <button @click="closeInvoice" class="red">取消</button>
+          <button type="button" @click="closeInvoice" class="red">取消</button>
         </div>
         <div class="right flex">
-          <button @click="saveDraft" class="dark-purple">保存草稿</button>
-          <button @click="publishInvoice" class="dark-purple">创建账单</button>
+          <button
+            v-if="!editInvoice"
+            type="submit"
+            @click="saveDraft"
+            class="dark-purple"
+          >
+            保存草稿
+          </button>
+          <button
+            v-if="!editInvoice"
+            type="submit"
+            @click="publishInvoice"
+            class="purple"
+          >
+            创建账单
+          </button>
+          <button v-if="editInvoice" type="submit" class="purple">
+            更新账单
+          </button>
         </div>
       </div>
     </form>
@@ -186,14 +205,20 @@
 
 <script>
 import db from "../firebase/firebaseInit"
-import { mapMutations } from "vuex"
+import Loading from "../components/Loading.vue"
+import { mapActions, mapMutations, mapState } from "vuex"
 import { uid } from "uid"
 
 export default {
   name: "invoiceModal",
+  components: {
+    Loading,
+  },
   data() {
     return {
       dateOptions: { year: "numeric", month: "short", day: "numeric" },
+      docId: null,
+      loading: false,
       billerStreetAddress: null,
       billerCity: null,
       billerZipCode: null,
@@ -217,15 +242,51 @@ export default {
     }
   },
   created() {
-    // get current date for invoice data field
-    this.invoiceDateUnix = Date.now()
-    this.invoiceDate = new Date(this.invoiceDateUnix).toLocaleDateString(
-      "en-us",
-      this.dateOptions
-    )
+    if (!this.editInvoice) {
+      // get current date for invoice data field
+      this.invoiceDateUnix = Date.now()
+      this.invoiceDate = new Date(this.invoiceDateUnix).toLocaleDateString(
+        "en-us",
+        this.dateOptions
+      )
+    }
+    if (this.editInvoice) {
+      const currentInvoice = this.currentInvoiceArray[0]
+      this.docId = currentInvoice.docId
+      this.billerStreetAddress = currentInvoice.billerStreetAddress
+      this.billerCity = currentInvoice.billerCity
+      this.billerZipCode = currentInvoice.billerZipCode
+      this.billerCountry = currentInvoice.billerCountry
+      this.clientName = currentInvoice.clientName
+      this.clientEmail = currentInvoice.clientEmail
+      this.clientStreetAddress = currentInvoice.clientStreetAddress
+      this.clientCity = currentInvoice.clientCity
+      this.clientZipCode = currentInvoice.clientZipCode
+      this.clientCountry = currentInvoice.clientCountry
+      this.invoiceDateUnix = currentInvoice.invoiceDateUnix
+      this.invoiceDate = currentInvoice.invoiceDate
+      this.paymentTerms = currentInvoice.paymentTerms
+      this.paymentDueDateUnix = currentInvoice.paymentDueDateUnix
+      this.paymentDueDate = currentInvoice.paymentDueDate
+      this.productDescription = currentInvoice.productDescription
+      this.invoicePending = currentInvoice.invoicePending
+      this.invoiceDraft = currentInvoice.invoiceDraft
+      this.invoiceItemList = currentInvoice.invoiceItemList
+      this.invoiceTotal = currentInvoice.invoiceTotal
+    }
   },
   methods: {
-    ...mapMutations(["TOGGLE_INVOICE"]),
+    ...mapMutations(["TOGGLE_INVOICE", "TOGGLE_MODAL", "TOGGLE_EDIT_INVOICE"]),
+
+    ...mapActions(["UPDATE_INVOICE", "GET_INVOICES"]),
+
+    checkClick(e) {
+      console.log(e)
+      if (e.target === this.$refs.invoiceWrap) {
+        this.TOGGLE_MODAL()
+      }
+    },
+
     addNewInvoiceItem() {
       this.invoiceItemList.push({
         id: uid(),
@@ -235,25 +296,35 @@ export default {
         total: 0,
       })
     },
+
     deleteInvoiceItem(id) {
       this.invoiceItemList = this.invoiceItemList.filter(
         invoiceItem => invoiceItem.id !== id
       )
     },
+
     closeInvoice() {
       this.TOGGLE_INVOICE()
+      if (this.editInvoice) {
+        this.TOGGLE_EDIT_INVOICE()
+      }
     },
+
     saveDraft() {
       this.invoiceDraft = true
     },
+
     publishInvoice() {
       this.invoicePending = true
     },
+
     async uploadInvoice() {
       if (this.invoiceItemList.length <= 0) {
         alert("请确认输入项内容！")
         return
       }
+
+      this.loading = true
 
       this.calInvoiceTotal()
 
@@ -283,10 +354,65 @@ export default {
         invoiceDraft: this.invoiceDraft,
         invoicePaid: null,
       })
+
+      this.loading = false
+
+      this.TOGGLE_INVOICE()
+
+      this.GET_INVOICES()
     },
+
+    async updateInvoice() {
+      if (this.invoiceItemList.length <= 0) {
+        alert("请确认输入项内容！")
+        return
+      }
+
+      this.loading = true
+
+      this.calInvoiceTotal()
+
+      const dataBase = db.collection("invoices").doc(this.docId)
+
+      await dataBase.update({
+        billerStreetAddress: this.billerStreetAddress,
+        billerCity: this.billerCity,
+        billerZipCode: this.billerZipCode,
+        billerCountry: this.billerCountry,
+        clientName: this.clientName,
+        clientEmail: this.clientEmail,
+        clientStreetAddress: this.clientStreetAddress,
+        clientCity: this.clientCity,
+        clientZipCode: this.clientZipCode,
+        clientCountry: this.clientCountry,
+        invoiceDate: this.invoiceDate,
+        invoiceDateUnix: this.invoiceDateUnix,
+        paymentTerms: this.paymentTerms,
+        paymentDueDate: this.paymentDueDate,
+        paymentDueDateUnix: this.paymentDueDateUnix,
+        productDescription: this.productDescription,
+        invoiceItemList: this.invoiceItemList,
+        invoiceTotal: this.invoiceTotal,
+      })
+
+      this.loading = false
+
+      const data = {
+        docId: this.docId,
+        routeId: this.$route.params.invoiceId,
+      }
+
+      this.UPDATE_INVOICE(data)
+    },
+
     submitForm() {
+      if (this.editInvoice) {
+        this.updateInvoice()
+        return
+      }
       this.uploadInvoice()
     },
+
     calInvoiceTotal() {
       this.invoiceTotal = 0
       this.invoiceItemList.forEach(item => {
@@ -304,6 +430,9 @@ export default {
         this.paymentDueDateUnix
       ).toLocaleDateString("en-us", this.dateOptions)
     },
+  },
+  computed: {
+    ...mapState(["editInvoice", "currentInvoiceArray"]),
   },
 }
 </script>
